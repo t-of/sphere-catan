@@ -238,7 +238,7 @@ const eMeshes = B.edges.map(([a, b], i) => {
   scene.add(m); return m;
 });
 const tileRings = B.tiles.map((t, i) => {
-  if (i < 12) return null;
+  if (!g.tiles[i].res) return null;
   const rho = v3(B.verts[t.verts[0]].pos).distanceTo(v3(t.center));
   const r = new THREE.Mesh(new THREE.TorusGeometry(rho * 0.93, 0.008, 6, 36).rotateX(Math.PI / 2), basic(ACCENT));
   stand(r, v3(t.center, 1.006)); r.visible = false; scene.add(r); return r;
@@ -281,7 +281,7 @@ cv.addEventListener('pointerup', (e) => {
   const r = cv.getBoundingClientRect();
   mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(mouse, camera);
-  const cand = [...vMeshes.filter((m) => m.visible), ...eMeshes.filter((m) => m.visible && g.eOwn[m.userData.e] == null), ...(g.phase === 'robber' ? tileMeshes.filter((m) => m.userData.tile >= 12) : [])];
+  const cand = [...vMeshes.filter((m) => m.visible), ...eMeshes.filter((m) => m.visible && g.eOwn[m.userData.e] == null), ...(g.phase === 'robber' ? tileMeshes.filter((m) => g.tiles[m.userData.tile].res) : [])];
   const hit = ray.intersectObjects(cand)[0]?.object;
   if (hit) act(hit.userData);
 });

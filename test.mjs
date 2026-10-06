@@ -1,24 +1,24 @@
 // node test.mjs（依存なし）
 import assert from 'node:assert/strict';
 import { buildBoard } from './board.js';
-import { RES, newGame, makeTiles, hexNeighbors, roadLength, updateLongest, tradeRate, bankTrade, legalRoad, legalSettle, legalCity, afford, moveRobber, steal, vp } from './game.js';
+import { RES, newGame, makeTiles, tileNeighbors, roadLength, updateLongest, tradeRate, bankTrade, legalRoad, legalSettle, legalCity, afford, moveRobber, steal, vp } from './game.js';
 
-const B = buildBoard(), nb = hexNeighbors(B);
+const B = buildBoard(), nb = tileNeighbors(B);
 const PIPS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
 const dot = (i, j) => B.tiles[i].center.reduce((s, x, k) => s + x * B.tiles[j].center[k], 0);
 
-// 盤を 1000 回作って 2 章の条件を毎回満たす
-for (let n = 0; n < 1000; n++) {
-  const t = makeTiles(B), pent = t.slice(0, 12), hex = t.slice(12);
-  assert(pent.every((x) => x.market && !x.res && !x.num));
-  const cnt = (k) => pent.filter((x) => x.market === k).length;
-  RES.forEach((r) => assert.equal(cnt(r), 2)); assert.equal(cnt('any'), 2);
+// 盤を 200 回作って 2 章の条件を毎回満たす（五角形は 2 組が土地、4 組が市場）
+for (let n = 0; n < 200; n++) {
+  const t = makeTiles(B), pent = t.slice(0, 12), land = t.filter((x) => x.res);
+  const mk = pent.filter((x) => x.market), lp = pent.filter((x) => x.res);
+  assert(mk.every((x) => !x.res && !x.num)); assert.equal(mk.length, 8); assert.equal(lp.length, 4);
+  assert.equal(mk.filter((x) => x.market === 'any').length, 2);
   for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) if (dot(i, j) < -0.99) assert.equal(t[i].market, t[j].market);
-  RES.forEach((r) => assert.equal(hex.filter((x) => x.res === r).length, 4));
-  assert.equal(hex.map((x) => x.num).sort((a, b) => a - b).join(), [2, 3, 3, 4, 4, 5, 5, 5, 6, 6, 8, 8, 9, 9, 9, 10, 10, 11, 11, 12].join());
+  assert.equal(RES.map((r) => land.filter((x) => x.res === r).length).sort().join(), '4,5,5,5,5');
+  assert.equal(land.map((x) => x.num).sort((a, b) => a - b).join(), [2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12].join());
   const red = (x) => x.num === 6 || x.num === 8;
-  for (let a = 12; a < 32; a++) for (const b of nb[a]) assert(!(red(t[a]) && red(t[b])) && t[a].num !== t[b].num && t[a].res !== t[b].res);
-  RES.forEach((r) => { const p = hex.filter((x) => x.res === r).reduce((s, x) => s + PIPS[x.num], 0); assert(p >= 10 && p <= 17); });
+  for (let a = 0; a < 32; a++) if (t[a].res) for (const b of nb[a]) if (t[b].res) assert(!(red(t[a]) && red(t[b])) && t[a].num !== t[b].num && t[a].res !== t[b].res);
+  RES.forEach((r) => { const p = land.filter((x) => x.res === r).reduce((s, x) => s + PIPS[x.num], 0); assert(p >= 11 && p <= 19); });
 }
 
 const g0 = () => newGame(B);

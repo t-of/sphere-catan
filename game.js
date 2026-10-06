@@ -1,41 +1,44 @@
-// ルール本体（DOM なし）。発展カード・最大騎士力・プレイヤー間交換はまだ無い。五角形は市場（生産しない）。
+// ルール本体（DOM なし）。発展カード・最大騎士力・プレイヤー間交換はまだ無い。五角形は 8 枚が市場（生産しない）、4 枚が土地。
 export const RES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
 export const COST = { road: { wood: 1, brick: 1 }, settle: { wood: 1, brick: 1, sheep: 1, wheat: 1 }, city: { wheat: 2, ore: 3 } };
 const ORDER = [0, 1, 2, 2, 1, 0]; // 初期配置の順（往路・復路）
 export const MAX = { road: 15, settle: 5, city: 4 }; // 1 人の駒の上限
-const NUMS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12, 5, 9]; // 六角形 20 枚（点の合計 66）
+const NUMS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12, 5, 9, 3, 4, 10, 11]; // 土地 24 枚（点の合計 76）
 const PIPS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
 const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const sum = (r) => RES.reduce((s, k) => s + r[k], 0);
 
-// 六角形（タイル 12〜31）どうしの隣り合い: 2 頂点を共有していれば隣
-export function hexNeighbors(B) {
+// タイルどうしの隣り合い: 2 頂点を共有していれば隣（五角形どうしは隣り合わない）
+export function tileNeighbors(B) {
   const nb = B.tiles.map(() => []);
-  for (let i = 12; i < 32; i++) for (let j = i + 1; j < 32; j++) {
+  for (let i = 0; i < 32; i++) for (let j = i + 1; j < 32; j++) {
     if (B.tiles[i].verts.filter((v) => B.tiles[j].verts.includes(v)).length === 2) { nb[i].push(j); nb[j].push(i); }
   }
   return nb;
 }
 // 盤の中身（市場・資源・数字）を作る。2 章 案 A の条件 1〜4 を満たすまでまぜ直す。
+// 真裏の五角形 6 組のうち 2 組は土地（資源と数字あり）、4 組は市場（3:1 と 2:1 の 3 種）
 export function makeTiles(B) {
-  const nb = hexNeighbors(B);
-  const hexes = [...Array(20).keys()].map((i) => i + 12);
-  // 市場: 真裏の五角形 6 組に 2:1 ×5 種と 3:1 を割り当てる
+  const nb = tileNeighbors(B);
   const pairs = [];
   for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) if (B.tiles[i].center.reduce((s, x, k) => s + x * B.tiles[j].center[k], 0) < -0.99) pairs.push([i, j]);
   const tiles = B.tiles.map(() => null);
-  const kinds = shuffle([...RES, 'any']);
-  shuffle(pairs).forEach(([i, j], k) => { tiles[i] = { res: null, num: 0, market: kinds[k] }; tiles[j] = { res: null, num: 0, market: kinds[k] }; });
+  const kinds = ['any', ...shuffle([...RES]).slice(0, 3)];
+  shuffle(pairs);
+  pairs.slice(0, 4).forEach(([i, j], k) => { tiles[i] = { res: null, num: 0, market: kinds[k] }; tiles[j] = { res: null, num: 0, market: kinds[k] }; });
+  const land = [...pairs.slice(4).flat(), ...[...Array(20).keys()].map((i) => i + 12)];
+  const at = new Map(land.map((t, i) => [t, i]));
+  const extra = shuffle([...RES]).slice(0, 4); // 土地は 1 種が 4 枚、ほかの 4 種が 5 枚
   let res;
-  do { res = shuffle(RES.flatMap((r) => Array(4).fill(r))); } while (hexes.some((t, i) => nb[t].some((u) => res[u - 12] === res[i])));
+  do { res = shuffle([...extra, ...RES.flatMap((r) => Array(4).fill(r))]); } while (land.some((t, i) => nb[t].some((u) => res[at.get(u)] === res[i])));
   let nums;
   do {
     nums = shuffle([...NUMS]);
     const red = (i) => nums[i] === 6 || nums[i] === 8;
-    var ok = hexes.every((t, i) => nb[t].every((u) => nums[u - 12] !== nums[i] && !(red(i) && red(u - 12))));
-    for (const r of RES) { const p = hexes.reduce((s, t, i) => s + (res[i] === r ? PIPS[nums[i]] : 0), 0); if (p < 10 || p > 17) ok = false; }
+    var ok = land.every((t, i) => nb[t].every((u) => nums[at.get(u)] !== nums[i] && !(red(i) && red(at.get(u)))));
+    for (const r of RES) { const p = land.reduce((s, t, i) => s + (res[i] === r ? PIPS[nums[i]] : 0), 0); if (p < 11 || p > 19) ok = false; }
   } while (!ok);
-  hexes.forEach((t, i) => { tiles[t] = { res: res[i], num: nums[i] }; });
+  land.forEach((t, i) => { tiles[t] = { res: res[i], num: nums[i] }; });
   return tiles;
 }
 
@@ -149,9 +152,9 @@ export function discard(g, r) {
   h[r]--; d.n--;
   nextDiscard(g);
 }
-// 盗賊を六角形に動かす。奪える相手が 2 人以上なら 'steal' で手番の人が選ぶ
+// 盗賊を土地に動かす。奪える相手が 2 人以上なら 'steal' で手番の人が選ぶ
 export function moveRobber(g, t) {
-  if (t === g.robber || t < 12) return;
+  if (t === g.robber || !g.tiles[t].res) return;
   g.robber = t;
   g.victims = [...new Set(g.B.tiles[t].verts.map((v) => g.vOwn[v]).filter((o) => o && o.p !== g.cur && sum(g.players[o.p].hand) > 0).map((o) => o.p))];
   if (g.victims.length > 1) { g.phase = 'steal'; return; }
