@@ -1,0 +1,68 @@
+:root {
+  --bg: #0b0c10;
+  --fg: #eceef3;
+  --muted: #9aa0ab;
+  --accent: #ffd35c;
+}
+
+* { box-sizing: border-box; }
+
+/* Safari 26 の上下バーの色は html の背景から取られる。body と同じ色にしておく */
+html { background-color: var(--bg); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+/* 画面の端に置くものはセーフエリアの分だけ内側に。高さは 100vh ではなく 100dvh */
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding:
+    max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+}
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bar__title { margin: 0; font-size: 18px; }
+.bar__actions { display: flex; gap: 8px; }
+.pill {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.stage {
+  flex: 1;
+  position: relative;
+  min-height: 260px;
+  touch-action: manipulation;   /* ダブルタップ拡大を止める */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.credit { text-align: center; font-size: 12px; color: var(--muted); }
+.credit a { color: inherit; }
+
+/* 全画面のオーバーレイは opacity ではなく display: none で隠す */
+
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+.msg { position: absolute; left: 0; right: 0; top: 4px; text-align: center; font-size: 14px; pointer-events: none; text-shadow: 0 1px 3px #000; }
+.panel { padding: 6px 0; display: grid; gap: 6px; }
+.who { font-size: 15px; font-weight: 700; }
+.hand { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid rgba(255,255,255,.2); border-radius: 8px; padding: 4px 8px; font-size: 14px; background: rgba(255,255,255,.06); min-width: 52px; text-align: center; }
+.chip b { margin-left: 4px; }
+.btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill:disabled { opacity: .35; cursor: default; }
+.pill.on { background: var(--accent); color: #222; }
+.trade { font-size: 13px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.trade select { font: inherit; background: #1b1d24; color: var(--fg); border-radius: 6px; border: 1px solid rgba(255,255,255,.2); }
