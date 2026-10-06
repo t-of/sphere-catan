@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { buildBoard } from './board.js';
-import { RES, afford, bankTrade, build, discard, endTurn, legalCity, legalRoad, legalSettle, moveRobber, newGame, roll, steal, tradeRate, vp } from './game.js';
+import { COST, RES, afford, bankTrade, build, discard, endTurn, legalCity, legalRoad, legalSettle, moveRobber, newGame, roll, steal, tradeRate, vp } from './game.js';
 
 WebAppKit.init({ title: 'sphere-catan', text: 'サッカーボールの上のカタン' });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
@@ -10,6 +10,9 @@ const NAME = { wood: '木', brick: 'レンガ', sheep: '羊', wheat: '麦', ore:
 const COL = { wood: 0x2f7d32, brick: 0xb5502d, sheep: 0x9fd86b, wheat: 0xe6c84a, ore: 0x7d8794, none: 0xd8c690 };
 const PCOL = [0xe53935, 0x1e88e5, 0xfb8c00];
 const PNAME = ['赤', '青', '橙'];
+const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+const DIE = '⚀⚁⚂⚃⚄⚅';
+const BNAME = { road: '道', settle: '開拓地', city: '都市' };
 let actx = null; // 効果音（最小限。仕様 10 章の音の作り込みは次の段階）
 function beep(f = 440, d = 0.08) {
   try {
@@ -27,7 +30,7 @@ let mode = null; // 本番の建設モード: 'road' | 'settle' | 'city'
 
 // ---- three.js ----
 const cv = $('cv');
-const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }); // 背景は CSS の宇宙グラデーション
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
@@ -63,8 +66,32 @@ B.tiles.forEach((t, i) => {
   m.userData.tile = i; scene.add(m); tileMeshes.push(m);
   if (mk || g.tiles[i].num) { const s = chip(mk ? (mk === 'any' ? '3:1' : '2:1') : g.tiles[i].num, mk); s.position.copy(c).multiplyScalar(1.03); scene.add(s); }
 });
-const robberMesh = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshLambertMaterial({ color: 0x222222 }));
+// 盗賊: 裾の広い胴体＋頭＋とんがり帽子
+const robberMesh = new THREE.Group();
+{
+  const dark = new THREE.MeshLambertMaterial({ color: 0x1c1c24 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.05, 0.1, 10), dark); body.position.y = 0.05;
+  const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.03, 1), new THREE.MeshLambertMaterial({ color: 0xe8d4b0 })); head.position.y = 0.12;
+  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.06, 10), dark); hat.position.y = 0.17;
+  robberMesh.add(body, head, hat);
+}
 scene.add(robberMesh);
+// 建物: 開拓地 = 家（箱＋屋根）、都市 = 大きな建物（広い土台＋塔＋屋根）
+function building(city, color) {
+  const mat = new THREE.MeshLambertMaterial({ color }), roof = new THREE.MeshLambertMaterial({ color: new THREE.Color(color).multiplyScalar(0.55) });
+  const grp = new THREE.Group();
+  const add = (geo, m, y) => { const o = new THREE.Mesh(geo, m); o.position.y = y; grp.add(o); return o; };
+  if (!city) {
+    add(new THREE.BoxGeometry(0.06, 0.04, 0.05), mat, 0.02);
+    add(new THREE.ConeGeometry(0.048, 0.04, 4), roof, 0.06).rotation.y = Math.PI / 4;
+  } else {
+    add(new THREE.BoxGeometry(0.12, 0.05, 0.07), mat, 0.025);
+    const tw = add(new THREE.BoxGeometry(0.06, 0.1, 0.06), mat, 0.075); tw.position.x = -0.025;
+    add(new THREE.ConeGeometry(0.048, 0.05, 4), roof, 0.15).position.x = -0.025;
+    grp.children[2].rotation.y = Math.PI / 4;
+  }
+  return grp;
+}
 
 // 頂点の目印と辺の目印（置ける場所を光らせる。道は辺の目印をそのまま色づけ）
 const vMeshes = B.verts.map((v, i) => {
@@ -83,8 +110,7 @@ function refresh() {
   bMeshes.forEach((m) => scene.remove(m)); bMeshes.length = 0;
   g.vOwn.forEach((o, i) => {
     if (!o) return;
-    const s = o.city ? 0.07 : 0.05;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), new THREE.MeshLambertMaterial({ color: PCOL[o.p] }));
+    const m = building(o.city, PCOL[o.p]);
     m.position.copy(v3(B.verts[i].pos, 1.03)); m.quaternion.setFromUnitVectors(up, m.position.clone().normalize());
     scene.add(m); bMeshes.push(m);
   });
@@ -99,7 +125,7 @@ function refresh() {
     m.scale.set(o != null ? 1 : 1.6, 1, o != null ? 1 : 1.6);
   });
   robberMesh.visible = g.robber != null;
-  if (g.robber != null) robberMesh.position.copy(v3(B.tiles[g.robber].center, 1.07));
+  if (g.robber != null) { const c = v3(B.tiles[g.robber].center, 1.0); robberMesh.position.copy(c); robberMesh.quaternion.setFromUnitVectors(up, c.clone().normalize()); }
   ui();
 }
 
@@ -130,25 +156,43 @@ const T = { setupS: '開拓地を置く', setupR: '道を置く', roll: 'サイ�
 function ui() {
   const d = g.phase === 'discard' ? g.discard[0] : null;
   const hand = g.players[d ? d.p : g.cur].hand;
-  $('who').textContent = g.phase === 'over' ? `${PNAME[g.cur]}の勝ち！ ${vp(g, g.cur)} 点` : `${PNAME[g.cur]}の番　` + [0, 1, 2].map((p) => `${PNAME[p]}${vp(g, p)}点`).join(' ');
-  $('who').style.color = '#' + PCOL[g.cur].toString(16).padStart(6, '0');
+  const over = g.phase === 'over';
+  $('who').replaceChildren(...[0, 1, 2].map((p) => {
+    const el = document.createElement('div');
+    el.className = 'score' + (p === g.cur ? ' cur' : '') + (over && p === g.cur ? ' win' : '');
+    el.style.setProperty('--pc', hex(PCOL[p]));
+    const n = RES.reduce((t, r) => t + g.players[p].hand[r], 0);
+    el.innerHTML = `<i class="dot"></i><span class="score__name">${PNAME[p]}</span><b class="score__vp">${vp(g, p)}<small>点</small></b><span class="score__n">手札${n}</span>`;
+    return el;
+  }));
+  if (over) { const w = document.createElement('div'); w.className = 'win-banner'; w.style.setProperty('--pc', hex(PCOL[g.cur])); w.textContent = `${PNAME[g.cur]}の勝ち！ ${vp(g, g.cur)} 点`; $('who').append(w); }
+  $('hand').classList.toggle('discarding', !!d);
   $('hand').replaceChildren(...RES.map((r) => {
-    const b = document.createElement('button'); b.className = 'chip'; b.innerHTML = `${NAME[r]}<b>${hand[r]}</b>`;
+    const b = document.createElement('button'); b.className = 'card' + (hand[r] ? '' : ' zero'); b.style.setProperty('--c', hex(COL[r]));
+    b.innerHTML = `<span class="card__n">${hand[r]}</span><span class="card__name">${NAME[r]}</span>`;
     b.onclick = () => { if (d) { discard(g, r); refresh(); } };
     return b;
   }));
-  $('msg').textContent = g.phase === 'steal' ? '奪う相手を選ぶ' : d ? `${PNAME[d.p]}：手札を ${d.n} 枚捨てる（資源をタップ）` : [g.dice ? `出目 ${g.dice[0] + g.dice[1]}` : '', T[g.phase], g.msg].filter(Boolean).join('　');
+  const dice = g.dice ? `<span class="dice">${DIE[g.dice[0] - 1]} ${DIE[g.dice[1] - 1]}</span><b>${g.dice[0] + g.dice[1]}</b>` : '';
+  const txt = g.phase === 'steal' ? '奪う相手を選ぶ' : d ? `${PNAME[d.p]}：手札を ${d.n} 枚捨てる（資源をタップ）` : [T[g.phase], g.msg].filter(Boolean).join('　');
+  const m = $('msg'); m.innerHTML = dice; m.append(document.createTextNode(txt)); m.hidden = !dice && !txt;
   const main = g.phase === 'main';
   const mk = (label, fn, ok, on) => { const b = document.createElement('button'); b.className = 'pill' + (on ? ' on' : ''); b.textContent = label; b.disabled = !ok; b.onclick = fn; return b; };
-  const setMode = (m) => () => { mode = mode === m ? null : m; refresh(); };
+  const build_ = (kind) => {
+    const b = mk('', () => { mode = mode === kind ? null : kind; refresh(); }, main && afford(g, kind), mode === kind);
+    b.classList.add('build');
+    const need = RES.filter((r) => COST[kind][r]);
+    const miss = need.filter((r) => g.players[g.cur].hand[r] < COST[kind][r]);
+    b.innerHTML = `<span>${BNAME[kind]}</span><span class="cost">` + need.map((r) => `<em class="${main && miss.includes(r) ? 'lack' : ''}" style="--c:${hex(COL[r])}">${COST[kind][r]}</em>`).join('') + '</span>';
+    b.title = main && miss.length ? `不足: ${miss.map((r) => NAME[r]).join('・')}` : '';
+    return b;
+  };
   $('btns').replaceChildren(
     mk('サイコロ', () => { beep(330); roll(g); refresh(); }, g.phase === 'roll'),
-    mk('道', setMode('road'), main && afford(g, 'road'), mode === 'road'),
-    mk('開拓地', setMode('settle'), main && afford(g, 'settle'), mode === 'settle'),
-    mk('都市', setMode('city'), main && afford(g, 'city'), mode === 'city'),
+    build_('road'), build_('settle'), build_('city'),
     mk('交換', () => { $('trade').hidden = !$('trade').hidden; }, main),
-    mk('終了', () => { endTurn(g); mode = null; refresh(); }, main),
-    ...(g.phase === 'over' ? [mk('もう一度', () => location.reload(), true)] : []),
+    mk('手番終了', () => { endTurn(g); mode = null; refresh(); }, main),
+    ...(over ? [mk('もう一度', () => location.reload(), true)] : []),
   );
   if (g.phase === 'steal') $('btns').replaceChildren(...g.victims.map((p) => mk(`${PNAME[p]}から奪う`, () => { steal(g, p); refresh(); }, true)));
   if (!main) $('trade').hidden = true;
