@@ -76,4 +76,13 @@ moveRobber(g, 12); assert.equal(g.phase, 'steal'); assert.equal(g.robber, 12);
 steal(g, 0); assert.equal(g.phase, 'steal');
 steal(g, 2); assert.equal(g.phase, 'main'); assert.equal(g.players[0].hand.ore, 1);
 
+// CPU 同士の対局が必ず終局する（画面なし・40 局・1 局 4000 手まで）
+import { cpuStep } from './cpu.js';
+for (let n = 0; n < 40; n++) {
+  const c = newGame(B); let k = 0;
+  while (c.phase !== 'over' && k++ < 4000) cpuStep(c);
+  assert.equal(c.phase, 'over', `対局 ${n} が ${k} 手で終わらない`);
+  assert(vp(c, c.winner) >= 10);
+}
+
 console.log('ok');

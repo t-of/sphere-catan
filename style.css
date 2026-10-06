@@ -151,3 +151,11 @@ button { font: inherit; color: inherit; }
 .trade select { font: inherit; font-size: 15px; min-height: 40px; background: var(--btn-bg); color: var(--fg); border-radius: 10px; border: 1px solid var(--btn-edge); padding: 0 8px; }
 #tbtn { min-height: 44px; flex: 1 1 100%; }
 @media (min-width: 560px) { #tbtn { flex: 0 0 auto; padding: 0 20px; } }
+
+/* ---- ホーム画面 ---- */
+.setup { max-width: 460px; width: 100%; margin: auto; text-align: center; gap: 14px; }
+.setup__title { margin: 0; font-family: var(--serif); font-size: 26px; color: var(--accent-hi); }
+.setup__lead { margin: 0; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.seats { display: grid; gap: 8px; }
+.seat { display: grid; grid-template-columns: auto 1fr 64px 64px; align-items: center; gap: 8px; text-align: left; }
+.seat b { font-size: 14px; }

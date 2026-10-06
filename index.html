@@ -39,10 +39,18 @@
     <header class="bar">
       <h1 class="bar__title">sphere-catan</h1>
       <div class="bar__actions">
+        <button class="btn btn--small" id="homeBtn" hidden>ホームへ</button>
         <button class="btn btn--small" data-wak="install" hidden>アプリにする</button>
         <button class="btn btn--small" data-wak="share">共有</button>
       </div>
     </header>
+
+    <section class="panel setup" id="home">
+      <h2 class="setup__title">サッカーボールのカタン</h2>
+      <p class="setup__lead">サッカーボール形の盤で遊ぶ、3 人のカタン風ゲーム。3 人とも CPU にすると観戦できます。</p>
+      <div class="seats" id="seats"></div>
+      <button class="btn btn--accent" id="startBtn">はじめる</button>
+    </section>
 
     <section class="stage" id="stage">
       <canvas id="cv"></canvas>

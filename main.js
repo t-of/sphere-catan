@@ -2,6 +2,7 @@ import * as THREE from './vendor/three.module.min.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import * as I from './illust.js';
 import { buildBoard } from './board.js';
+import { cpuStep } from './cpu.js';
 import { COST, RES, afford, bankTrade, build, discard, endTurn, legalCity, legalRoad, legalSettle, moveRobber, newGame, roll, steal, tradeRate, vp } from './game.js';
 
 WebAppKit.init({ title: 'sphere-catan', text: 'サッカーボールの上のカタン' });
@@ -39,7 +40,13 @@ function resIcon(kind) {
 const $ = (id) => document.getElementById(id);
 
 const B = buildBoard();
-const g = newGame(B);
+let g = newGame(B);
+const SKEY = 'sphere-catan.cpu'; // 3 人それぞれ CPU かどうか（true = CPU）
+let cpu = [false, true, true];
+try { const s = JSON.parse(localStorage.getItem(SKEY)); if (Array.isArray(s) && s.length === 3) cpu = s.map(Boolean); } catch { /* 覚えられなくても遊べる */ }
+let atHome = true, timer = 0;
+const actor = () => (g.phase === 'discard' ? g.discard[0].p : g.cur);
+const locked = () => g.phase !== 'over' && cpu[actor()]; // CPU の番は人の操作を受けない
 let mode = null; // 本番の建設モード: 'road' | 'settle' | 'city'
 
 // ---- three.js（盤の見た目は 2D 版 catan に合わせる: 資源色のタイル・イラスト・数字チップ・港・駒の形と色）----
@@ -169,17 +176,28 @@ function fanGeo(c, q, uv) {
   if (uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(tc, 2));
   return geo;
 }
-B.tiles.forEach((t, i) => {
-  const c = v3(t.center), pv = t.verts.map((v) => v3(B.verts[v].pos));
-  const ring = (k, rad) => pv.map((p) => p.clone().sub(c).multiplyScalar(k).add(c).normalize().multiplyScalar(rad));
-  const { t: nt, r: nr } = frame(c), rho = pv[0].distanceTo(c), kk = 1 / (rho * 2 * 1.05);
-  const uv = (p) => { const d = p.clone().sub(c); return [d.dot(nr) * kk + 0.5, d.dot(nt) * kk + 0.5]; };
-  const mk = g.tiles[i].market, res = g.tiles[i].res;
-  scene.add(new THREE.Mesh(fanGeo(c.clone().multiplyScalar(0.9975), ring(0.975, 0.9975)), rimFor(mk ? 0x0e5265 : parseInt(I.TERRAIN_STYLE[TERRAIN[res]].edge.slice(1), 16))));
-  const m = new THREE.Mesh(fanGeo(c, ring(0.93, 1), uv), matFor(res, mk));
-  m.userData.tile = i; scene.add(m); tileMeshes.push(m);
-  if (!mk && g.tiles[i].num) scene.add(chip(g.tiles[i].num, c));
-});
+const tileObjs = [], tileRings = [];
+function buildTiles() {
+  tileObjs.forEach((o) => scene.remove(o)); tileObjs.length = 0; tileMeshes.length = 0; tileRings.length = 0;
+  const add = (o) => { scene.add(o); tileObjs.push(o); };
+  B.tiles.forEach((t, i) => {
+    const c = v3(t.center), pv = t.verts.map((v) => v3(B.verts[v].pos));
+    const ring = (k, rad) => pv.map((p) => p.clone().sub(c).multiplyScalar(k).add(c).normalize().multiplyScalar(rad));
+    const { t: nt, r: nr } = frame(c), rho = pv[0].distanceTo(c), kk = 1 / (rho * 2 * 1.05);
+    const uv = (p) => { const d = p.clone().sub(c); return [d.dot(nr) * kk + 0.5, d.dot(nt) * kk + 0.5]; };
+    const mk = g.tiles[i].market, res = g.tiles[i].res;
+    add(new THREE.Mesh(fanGeo(c.clone().multiplyScalar(0.9975), ring(0.975, 0.9975)), rimFor(mk ? 0x0e5265 : parseInt(I.TERRAIN_STYLE[TERRAIN[res]].edge.slice(1), 16))));
+    const m = new THREE.Mesh(fanGeo(c, ring(0.93, 1), uv), matFor(res, mk));
+    m.userData.tile = i; add(m); tileMeshes.push(m);
+    if (!mk && g.tiles[i].num) add(chip(g.tiles[i].num, c));
+  });
+  B.tiles.forEach((t, i) => {
+    if (!g.tiles[i].res) { tileRings.push(null); return; }
+    const rho = v3(B.verts[t.verts[0]].pos).distanceTo(v3(t.center));
+    const r = new THREE.Mesh(new THREE.TorusGeometry(rho * 0.93, 0.008, 6, 36).rotateX(Math.PI / 2), basic(ACCENT));
+    stand(r, v3(t.center, 1.006)); r.visible = false; add(r); tileRings.push(r);
+  });
+}
 
 // ---- 駒（catan の形を押し出したもの。色は catan のプレイヤー色）----
 const ink = basic(0x1b1612);
@@ -237,12 +255,6 @@ const eMeshes = B.edges.map(([a, b], i) => {
   dk.scale.y = gd.scale.y = len * 0.8; dk.position.z = 0.002; gd.position.z = 0.004; m.add(dk, gd);
   scene.add(m); return m;
 });
-const tileRings = B.tiles.map((t, i) => {
-  if (!g.tiles[i].res) return null;
-  const rho = v3(B.verts[t.verts[0]].pos).distanceTo(v3(t.center));
-  const r = new THREE.Mesh(new THREE.TorusGeometry(rho * 0.93, 0.008, 6, 36).rotateX(Math.PI / 2), basic(ACCENT));
-  stand(r, v3(t.center, 1.006)); r.visible = false; scene.add(r); return r;
-});
 function road(a, b, color) { // 黒縁の道（catan と同じ。縁の太さ 10・色の太さ 6）
   const A = v3(B.verts[a].pos), C = v3(B.verts[b].pos), { mid, q, len } = edgeBasis(A, C);
   const grp = new THREE.Group(), dk = new THREE.Mesh(roadDark, ink), body = new THREE.Mesh(roadCol, solidOf(color));
@@ -270,6 +282,7 @@ function refresh() {
     stand(robberMesh, c.clone().addScaledVector(t, -14 * K).addScaledVector(r, 2 * K).normalize().multiplyScalar(1.002));
   }
   ui();
+  pump();
 }
 
 // ---- 操作（ドラッグは回転、ほぼ動かさずに離したらタップ）----
@@ -277,7 +290,7 @@ const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
 let down = null;
 cv.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
 cv.addEventListener('pointerup', (e) => {
-  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return;
+  if (atHome || locked() || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return;
   const r = cv.getBoundingClientRect();
   mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(mouse, camera);
@@ -313,16 +326,16 @@ function ui() {
   $('hand').replaceChildren(...RES.map((r) => {
     const b = document.createElement('button'); b.className = 'hand__res' + (hand[r] ? '' : ' zero'); b.title = NAME[r];
     b.append(resIcon(r)); b.insertAdjacentHTML('beforeend', `<b>${hand[r]}</b>`);
-    b.onclick = () => { if (d) { discard(g, r); refresh(); } };
+    b.onclick = () => { if (d && !locked()) { discard(g, r); refresh(); } };
     return b;
   }));
   const dice = g.dice ? `<span class="dice">${DIE[g.dice[0] - 1]} ${DIE[g.dice[1] - 1]}</span><b>${g.dice[0] + g.dice[1]}</b>` : '';
   const txt = g.phase === 'steal' ? '奪う相手を選ぶ' : d ? `${PNAME[d.p]}：手札を ${d.n} 枚捨てる（資源をタップ）` : [T[g.phase], g.msg].filter(Boolean).join('　');
   const m = $('msg'); m.innerHTML = dice; m.append(document.createTextNode(txt)); m.hidden = !dice && !txt;
   const main = g.phase === 'main';
-  const mk = (label, fn, ok, on) => { const b = document.createElement('button'); b.className = 'btn' + (on ? ' is-selected' : ''); b.textContent = label; b.disabled = !ok; b.onclick = fn; return b; };
+  const mk = (label, fn, ok, on) => { const b = document.createElement('button'); b.className = 'btn' + (on ? ' is-selected' : ''); b.textContent = label; b.disabled = !ok || locked(); b.onclick = fn; return b; };
   const build_ = (kind) => {
-    const b = mk('', () => { mode = mode === kind ? null : kind; refresh(); }, main && afford(g, kind), mode === kind);
+    const b = mk('', () => { mode = mode === kind ? null : kind; refresh(); }, main && afford(g, kind) && !locked(), mode === kind);
     b.classList.add('build-btn');
     const need = RES.filter((r) => COST[kind][r]);
     const miss = need.filter((r) => g.players[g.cur].hand[r] < COST[kind][r]);
@@ -336,7 +349,7 @@ function ui() {
     build_('road'), build_('settle'), build_('city'),
     mk('交換', () => { $('trade').hidden = !$('trade').hidden; }, main),
     mk('手番終了', () => { endTurn(g); mode = null; refresh(); }, main),
-    ...(over ? [mk('もう一度', () => location.reload(), true)] : []),
+    ...(over ? [mk('もう一度', startGame, true)] : []),
   );
   if (g.phase === 'steal') $('btns').replaceChildren(...g.victims.map((p) => mk(`${PNAME[p]}から奪う`, () => { steal(g, p); refresh(); }, true)));
   if (!main) $('trade').hidden = true;
@@ -350,13 +363,43 @@ function rateText() { // 交換の率（市場に接していれば 2:1 / 3:1、
 for (const id of ['give', 'get']) $(id).replaceChildren(...RES.map((r) => new Option(NAME[r], r)));
 $('get').value = 'brick';
 $('give').onchange = rateText;
-$('tbtn').onclick = () => { if (bankTrade(g, $('give').value, $('get').value)) refresh(); };
+$('tbtn').onclick = () => { if (!locked() && bankTrade(g, $('give').value, $('get').value)) refresh(); };
 
 function resize() {
   const r = cv.getBoundingClientRect();
+  if (!r.width || !r.height) return; // ホーム画面の間は盤が隠れている
   renderer.setSize(r.width, r.height, false);
   camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(cv);
 (function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
-refresh(); resize();
+
+// ---- ホーム画面と CPU ----
+function pump() { // CPU の番なら少し間を空けて 1 手打つ（ホームに戻ったら止まる）
+  clearTimeout(timer);
+  if (atHome || g.phase === 'over' || !cpu[actor()]) return;
+  const cur = g;
+  timer = setTimeout(() => { if (atHome || cur !== g) return; cpuStep(g); mode = null; refresh(); }, 500);
+}
+function show(home) {
+  atHome = home; clearTimeout(timer);
+  $('home').hidden = !home;
+  for (const id of ['stage', 'panel', 'homeBtn']) $(id).hidden = home;
+  if (!home) resize();
+}
+function startGame() {
+  g = newGame(B); mode = null; buildTiles(); show(false); refresh();
+}
+const seats = () => $('seats').replaceChildren(...[0, 1, 2].map((p) => {
+  const row = document.createElement('div'); row.className = 'seat';
+  row.innerHTML = `<span class="player-card__dot" style="background:${hex(PCOL[p])}">${PNAME[p]}</span><b>プレイヤー${p + 1}</b>`;
+  [['人', false], ['CPU', true]].forEach(([label, v]) => {
+    const b = document.createElement('button'); b.className = 'btn' + (cpu[p] === v ? ' is-selected' : ''); b.textContent = label;
+    b.onclick = () => { cpu[p] = v; try { localStorage.setItem(SKEY, JSON.stringify(cpu)); } catch { /* 覚えられなくても遊べる */ } seats(); };
+    row.append(b);
+  });
+  return row;
+}));
+$('startBtn').onclick = startGame;
+$('homeBtn').onclick = () => { if (confirm('ホームに戻ります。いまの対局は捨てられます。')) show(true); };
+seats(); show(true); resize();
