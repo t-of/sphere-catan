@@ -311,7 +311,7 @@ function act(u) {
 const T = { setupS: '開拓地を置く', setupR: '道を置く', roll: 'サイコロを振る', main: '建設・交換・手番終了', robber: '盗賊を動かす六角形をタップ', steal: '奪う相手を選ぶ', discard: '', over: '' };
 function ui() {
   const d = g.phase === 'discard' ? g.discard[0] : null;
-  const hand = g.players[d ? d.p : g.cur].hand;
+  const hand = g.players[cpu[actor()] && cpu.filter((c) => !c).length === 1 ? cpu.indexOf(false) : actor()].hand; // 人が 1 人なら CPU の手札は見せない
   const over = g.phase === 'over';
   $('who').replaceChildren(...[0, 1, 2].map((p) => {
     const el = document.createElement('div');
