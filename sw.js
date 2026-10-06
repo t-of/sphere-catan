@@ -9,7 +9,7 @@
 // ブラウザの HTTP キャッシュを通さない（install は reload、fetch は no-cache）。古い main.js と新しい index.html が混ざって動かなくなるのを防ぐ。
 
 const PREFIX = 'sphere-catan-';
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = `${PREFIX}${VERSION}`;
 const FONT_CACHE = `${PREFIX}fonts`;
 
@@ -21,12 +21,6 @@ const SHELL = [
   './board.js',
   './illust.js',
   './game.js',
-  './textures/forest_diff.jpg',
-  './textures/pasture_diff.jpg',
-  './textures/field_diff.jpg',
-  './textures/hills_diff.jpg',
-  './textures/mountains_diff.jpg',
-  './textures/desert_diff.jpg',
   './vendor/three.module.min.js',
   './vendor/OrbitControls.js',
   './manifest.webmanifest',
