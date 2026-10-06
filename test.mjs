@@ -68,7 +68,7 @@ assert.equal(tradeRate(g, 1, 'ore'), 4);
 
 // 盗賊: 最初は盤の外、五角形には置けない、相手が 2 人なら選ぶ
 g = g0(); g.cur = 0; g.phase = 'robber';
-assert.equal(g.robber, null); moveRobber(g, 3); assert.equal(g.robber, null);
+assert.equal(g.robber, null); moveRobber(g, g.tiles.findIndex((t) => t.market)); assert.equal(g.robber, null);
 const vs = B.tiles[12].verts;
 g.vOwn[vs[0]] = { p: 1, city: false }; g.vOwn[vs[2]] = { p: 2, city: false };
 g.players[1].hand.wood = 1; g.players[2].hand.ore = 1;
@@ -78,9 +78,17 @@ steal(g, 2); assert.equal(g.phase, 'main'); assert.equal(g.players[0].hand.ore, 
 
 // CPU 同士の対局が必ず終局する（画面なし・40 局・1 局 4000 手まで）
 import { cpuStep } from './cpu.js';
+import { encode, decode } from './game.js';
 for (let n = 0; n < 40; n++) {
   const c = newGame(B); let k = 0;
-  while (c.phase !== 'over' && k++ < 4000) cpuStep(c);
+  while (c.phase !== 'over' && k++ < 4000) {
+    cpuStep(c);
+    // 局面図: 最初の 5 局は毎手、配列にして戻すと同じ局面（長さ 337 で固定）
+    if (n >= 5) continue;
+    const a = encode(c), d = decode(B, a);
+    assert.equal(a.length, 337); assert.deepEqual(encode(d), a);
+    for (const f of ['phase', 'cur', 'dice', 'robber', 'longest', 'players', 'tiles', 'vOwn', 'eOwn']) assert.deepEqual(d[f], c[f]);
+  }
   assert.equal(c.phase, 'over', `対局 ${n} が ${k} 手で終わらない`);
   assert(vp(c, c.winner) >= 10);
 }

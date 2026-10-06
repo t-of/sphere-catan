@@ -196,3 +196,43 @@ export function bankTrade(g, give, get) {
   return true;
 }
 export function endTurn(g) { g.cur = (g.cur + 1) % 3; g.phase = 'roll'; g.dice = null; g.msg = ''; }
+
+// 局面図: 局面をまるごと整数の配列 1 本にする（B と msg は入れない）。decode(B, encode(g)) で同じ局面に戻る。
+// 長さ 337。並び: 頭 9 [段階, 手番, 初期配置の何手目, サイコロ 2, 直前の開拓地+1, 盗賊+1, 最長交易路+1, 勝者+1]
+//   + CPU 交換済み 1 + 捨てる枚数 3 + 奪える相手 3（+1、0 埋め）+ 手札 3×5
+//   + タイル 32×3 [資源+1, 数字, 市場（0 なし・1 any・2.. 資源+2）] + 頂点 60×2 [持ち主+1, 0/1 開拓地/2 都市] + 辺 90 [持ち主+1]
+export const PHASES = ['setupS', 'setupR', 'roll', 'discard', 'robber', 'steal', 'main', 'over'];
+const inc = (x) => (x == null ? 0 : x + 1), dec = (x) => (x ? x - 1 : null);
+export function encode(g) {
+  const v = g.victims || [];
+  return [
+    PHASES.indexOf(g.phase), g.cur, g.step, ...(g.dice || [0, 0]), inc(g.last), inc(g.robber), inc(g.longest), inc(g.winner),
+    g.cpuTraded ? 1 : 0,
+    ...[0, 1, 2].map((p) => (g.phase === 'discard' && g.discard.find((d) => d.p === p)?.n) || 0),
+    ...[0, 1, 2].map((i) => inc(v[i])),
+    ...g.players.flatMap((p) => RES.map((r) => p.hand[r])),
+    ...g.tiles.flatMap((t) => [RES.indexOf(t.res) + 1, t.num, t.market ? (t.market === 'any' ? 1 : RES.indexOf(t.market) + 2) : 0]),
+    ...g.vOwn.flatMap((o) => (o ? [o.p + 1, o.city ? 2 : 1] : [0, 0])),
+    ...g.eOwn.map(inc),
+  ];
+}
+export function decode(B, a) {
+  let i = 0;
+  const take = (n) => a.slice(i, (i += n));
+  const [ph, cur, step, d1, d2, last, robber, longest, winner, traded] = take(10);
+  const disc = take(3), vic = take(3), hands = take(15), tiles = take(96), vs = take(120), es = take(90);
+  const phase = PHASES[ph];
+  return {
+    B, phase, cur, step, dice: d1 ? [d1, d2] : null, last: dec(last), robber: dec(robber), longest: dec(longest), winner: dec(winner), msg: '',
+    cpuTraded: !!traded,
+    discard: phase === 'discard' ? disc.map((n, p) => ({ p, n })).filter((d) => d.n > 0) : null,
+    victims: phase === 'steal' ? vic.filter(Boolean).map(dec) : null,
+    players: [0, 1, 2].map((p) => ({ hand: Object.fromEntries(RES.map((r, k) => [r, hands[p * 5 + k]])) })),
+    tiles: B.tiles.map((_, t) => {
+      const [res, num, mk] = tiles.slice(t * 3, t * 3 + 3);
+      return mk ? { res: null, num: 0, market: mk === 1 ? 'any' : RES[mk - 2] } : { res: RES[res - 1], num };
+    }),
+    vOwn: B.verts.map((_, v) => (vs[v * 2] ? { p: vs[v * 2] - 1, city: vs[v * 2 + 1] === 2 } : null)),
+    eOwn: es.map(dec),
+  };
+}
