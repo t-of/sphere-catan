@@ -1,7 +1,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { buildBoard } from './board.js';
-import { RES, afford, bankTrade, build, discard, endTurn, legalCity, legalRoad, legalSettle, moveRobber, newGame, roll, vp } from './game.js';
+import { RES, afford, bankTrade, build, discard, endTurn, legalCity, legalRoad, legalSettle, moveRobber, newGame, roll, steal, tradeRate, vp } from './game.js';
 
 WebAppKit.init({ title: 'sphere-catan', text: 'サッカーボールの上のカタン' });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
@@ -10,6 +10,15 @@ const NAME = { wood: '木', brick: 'レンガ', sheep: '羊', wheat: '麦', ore:
 const COL = { wood: 0x2f7d32, brick: 0xb5502d, sheep: 0x9fd86b, wheat: 0xe6c84a, ore: 0x7d8794, none: 0xd8c690 };
 const PCOL = [0xe53935, 0x1e88e5, 0xfb8c00];
 const PNAME = ['赤', '青', '橙'];
+let actx = null; // 効果音（最小限。仕様 10 章の音の作り込みは次の段階）
+function beep(f = 440, d = 0.08) {
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume();
+    const o = actx.createOscillator(), a = actx.createGain();
+    o.frequency.value = f; a.gain.value = 0.05; o.connect(a); a.connect(actx.destination); o.start(); o.stop(actx.currentTime + d);
+  } catch { /* 鳴らせなくても遊べる */ }
+}
 const $ = (id) => document.getElementById(id);
 
 const B = buildBoard();
@@ -32,11 +41,11 @@ camera.add(sun); sun.position.set(2, 3, 4); scene.add(camera);
 const v3 = (a, k = 1) => new THREE.Vector3(a[0] * k, a[1] * k, a[2] * k);
 const up = new THREE.Vector3(0, 1, 0);
 const tileMeshes = [];
-const chip = (n) => {
+const chip = (n, mk) => {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const x = c.getContext('2d');
-  x.fillStyle = '#f6efd8'; x.beginPath(); x.arc(32, 32, 30, 0, 7); x.fill();
-  x.fillStyle = n === 6 || n === 8 ? '#d32f2f' : '#222'; x.font = 'bold 34px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = mk ? '#3a3a4a' : '#f6efd8'; x.beginPath(); x.arc(32, 32, 30, 0, 7); x.fill();
+  x.fillStyle = mk ? '#fff' : n === 6 || n === 8 ? '#d32f2f' : '#222'; x.font = `bold ${mk ? 24 : 34}px sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
   x.fillText(n, 32, 34);
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c) }));
   s.scale.set(0.2, 0.2, 1); return s;
@@ -48,9 +57,11 @@ B.tiles.forEach((t, i) => {
   q.forEach((p, k) => pos.push(...c.toArray(), ...p.toArray(), ...q[(k + 1) % q.length].toArray()));
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.computeVertexNormals();
-  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: COL[g.tiles[i].res || 'none'], side: THREE.DoubleSide }));
+  const mk = g.tiles[i].market; // 市場: 資源の色をうすめた灰色がかった色。生産タイルと区別する
+  const col = mk ? new THREE.Color(mk === 'any' ? 0x8a8a98 : COL[mk]).lerp(new THREE.Color(0x555566), 0.6) : new THREE.Color(COL[g.tiles[i].res]);
+  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide }));
   m.userData.tile = i; scene.add(m); tileMeshes.push(m);
-  if (g.tiles[i].num) { const s = chip(g.tiles[i].num); s.position.copy(c).multiplyScalar(1.03); scene.add(s); }
+  if (mk || g.tiles[i].num) { const s = chip(mk ? (mk === 'any' ? '3:1' : '2:1') : g.tiles[i].num, mk); s.position.copy(c).multiplyScalar(1.03); scene.add(s); }
 });
 const robberMesh = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshLambertMaterial({ color: 0x222222 }));
 scene.add(robberMesh);
@@ -87,7 +98,8 @@ function refresh() {
     m.material.color.setHex(o != null ? PCOL[o] : 0xffee58);
     m.scale.set(o != null ? 1 : 1.6, 1, o != null ? 1 : 1.6);
   });
-  robberMesh.position.copy(v3(B.tiles[g.robber].center, 1.07));
+  robberMesh.visible = g.robber != null;
+  if (g.robber != null) robberMesh.position.copy(v3(B.tiles[g.robber].center, 1.07));
   ui();
 }
 
@@ -100,11 +112,12 @@ cv.addEventListener('pointerup', (e) => {
   const r = cv.getBoundingClientRect();
   mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(mouse, camera);
-  const cand = [...vMeshes.filter((m) => m.visible), ...eMeshes.filter((m) => m.visible && g.eOwn[m.userData.e] == null), ...(g.phase === 'robber' ? tileMeshes : [])];
+  const cand = [...vMeshes.filter((m) => m.visible), ...eMeshes.filter((m) => m.visible && g.eOwn[m.userData.e] == null), ...(g.phase === 'robber' ? tileMeshes.filter((m) => m.userData.tile >= 12) : [])];
   const hit = ray.intersectObjects(cand)[0]?.object;
   if (hit) act(hit.userData);
 });
 function act(u) {
+  beep(u.tile != null ? 200 : 520);
   if (u.tile != null) moveRobber(g, u.tile);
   else if (g.phase === 'setupS' || g.phase === 'setupR') build(g, u.v != null ? 'settle' : 'road', u.v ?? u.e);
   else if (u.e != null) { build(g, 'road', u.e); mode = null; }
@@ -113,7 +126,7 @@ function act(u) {
 }
 
 // ---- 画面 ----
-const T = { setupS: '開拓地を置く', setupR: '道を置く', roll: 'サイコロを振る', main: '建設・交換・手番終了', robber: '盗賊を動かすタイルをタップ', discard: '', over: '' };
+const T = { setupS: '開拓地を置く', setupR: '道を置く', roll: 'サイコロを振る', main: '建設・交換・手番終了', robber: '盗賊を動かす六角形をタップ', steal: '奪う相手を選ぶ', discard: '', over: '' };
 function ui() {
   const d = g.phase === 'discard' ? g.discard[0] : null;
   const hand = g.players[d ? d.p : g.cur].hand;
@@ -124,12 +137,12 @@ function ui() {
     b.onclick = () => { if (d) { discard(g, r); refresh(); } };
     return b;
   }));
-  $('msg').textContent = d ? `${PNAME[d.p]}：手札を ${d.n} 枚捨てる（資源をタップ）` : [g.dice ? `出目 ${g.dice[0] + g.dice[1]}` : '', T[g.phase], g.msg].filter(Boolean).join('　');
+  $('msg').textContent = g.phase === 'steal' ? '奪う相手を選ぶ' : d ? `${PNAME[d.p]}：手札を ${d.n} 枚捨てる（資源をタップ）` : [g.dice ? `出目 ${g.dice[0] + g.dice[1]}` : '', T[g.phase], g.msg].filter(Boolean).join('　');
   const main = g.phase === 'main';
   const mk = (label, fn, ok, on) => { const b = document.createElement('button'); b.className = 'pill' + (on ? ' on' : ''); b.textContent = label; b.disabled = !ok; b.onclick = fn; return b; };
   const setMode = (m) => () => { mode = mode === m ? null : m; refresh(); };
   $('btns').replaceChildren(
-    mk('サイコロ', () => { roll(g); refresh(); }, g.phase === 'roll'),
+    mk('サイコロ', () => { beep(330); roll(g); refresh(); }, g.phase === 'roll'),
     mk('道', setMode('road'), main && afford(g, 'road'), mode === 'road'),
     mk('開拓地', setMode('settle'), main && afford(g, 'settle'), mode === 'settle'),
     mk('都市', setMode('city'), main && afford(g, 'city'), mode === 'city'),
@@ -137,11 +150,18 @@ function ui() {
     mk('終了', () => { endTurn(g); mode = null; refresh(); }, main),
     ...(g.phase === 'over' ? [mk('もう一度', () => location.reload(), true)] : []),
   );
+  if (g.phase === 'steal') $('btns').replaceChildren(...g.victims.map((p) => mk(`${PNAME[p]}から奪う`, () => { steal(g, p); refresh(); }, true)));
   if (!main) $('trade').hidden = true;
+  rateText();
 }
-// 交換（銀行と 4:1）
+function rateText() { // 交換の率（市場に接していれば 2:1 / 3:1、なければ 4:1）
+  const r = tradeRate(g, g.cur, $('give').value);
+  $('tbtn').textContent = `${r}:1 で交換`;
+}
+// 交換（銀行。率は市場しだい）
 for (const id of ['give', 'get']) $(id).replaceChildren(...RES.map((r) => new Option(NAME[r], r)));
 $('get').value = 'brick';
+$('give').onchange = rateText;
 $('tbtn').onclick = () => { if (bankTrade(g, $('give').value, $('get').value)) refresh(); };
 
 function resize() {

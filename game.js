@@ -1,31 +1,107 @@
-// ルール本体（DOM なし）。標準カタンから発展カード・港・最長交易路・最大騎士力・プレイヤー間交換を省いた版。
+// ルール本体（DOM なし）。発展カード・最大騎士力・プレイヤー間交換はまだ無い。五角形は市場（生産しない）。
 export const RES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
 export const COST = { road: { wood: 1, brick: 1 }, settle: { wood: 1, brick: 1, sheep: 1, wheat: 1 }, city: { wheat: 2, ore: 3 } };
 const ORDER = [0, 1, 2, 2, 1, 0]; // 初期配置の順（往路・復路）
-const NUMS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12, 3, 4, 5, 6, 8, 9, 10, 11, 4, 5, 9, 10, 6];
+export const MAX = { road: 15, settle: 5, city: 4 }; // 1 人の駒の上限
+const NUMS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12, 5, 9]; // 六角形 20 枚（点の合計 66）
+const PIPS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
 const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const sum = (r) => RES.reduce((s, k) => s + r[k], 0);
 
+// 六角形（タイル 12〜31）どうしの隣り合い: 2 頂点を共有していれば隣
+export function hexNeighbors(B) {
+  const nb = B.tiles.map(() => []);
+  for (let i = 12; i < 32; i++) for (let j = i + 1; j < 32; j++) {
+    if (B.tiles[i].verts.filter((v) => B.tiles[j].verts.includes(v)).length === 2) { nb[i].push(j); nb[j].push(i); }
+  }
+  return nb;
+}
+// 盤の中身（市場・資源・数字）を作る。2 章 案 A の条件 1〜4 を満たすまでまぜ直す。
+export function makeTiles(B) {
+  const nb = hexNeighbors(B);
+  const hexes = [...Array(20).keys()].map((i) => i + 12);
+  // 市場: 真裏の五角形 6 組に 2:1 ×5 種と 3:1 を割り当てる
+  const pairs = [];
+  for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) if (B.tiles[i].center.reduce((s, x, k) => s + x * B.tiles[j].center[k], 0) < -0.99) pairs.push([i, j]);
+  const tiles = B.tiles.map(() => null);
+  const kinds = shuffle([...RES, 'any']);
+  shuffle(pairs).forEach(([i, j], k) => { tiles[i] = { res: null, num: 0, market: kinds[k] }; tiles[j] = { res: null, num: 0, market: kinds[k] }; });
+  let res;
+  do { res = shuffle(RES.flatMap((r) => Array(4).fill(r))); } while (hexes.some((t, i) => nb[t].some((u) => res[u - 12] === res[i])));
+  let nums;
+  do {
+    nums = shuffle([...NUMS]);
+    const red = (i) => nums[i] === 6 || nums[i] === 8;
+    var ok = hexes.every((t, i) => nb[t].every((u) => nums[u - 12] !== nums[i] && !(red(i) && red(u - 12))));
+    for (const r of RES) { const p = hexes.reduce((s, t, i) => s + (res[i] === r ? PIPS[nums[i]] : 0), 0); if (p < 10 || p > 17) ok = false; }
+  } while (!ok);
+  hexes.forEach((t, i) => { tiles[t] = { res: res[i], num: nums[i] }; });
+  return tiles;
+}
+
 export function newGame(B) {
-  const kinds = shuffle([...Array(7).fill('wood'), ...Array(6).fill('brick'), ...Array(6).fill('sheep'), ...Array(6).fill('wheat'), ...Array(6).fill('ore')]);
-  const desert = Math.floor(Math.random() * 12);
-  const nums = shuffle([...NUMS]);
-  const tiles = B.tiles.map((_, t) => (t === desert ? { res: null, num: 0 } : { res: kinds.pop(), num: nums.pop() }));
   return {
-    B, tiles, robber: desert, cur: 0, step: 0, phase: 'setupS', dice: null, last: null, discard: null, msg: '',
+    B, tiles: makeTiles(B), robber: null, cur: 0, step: 0, phase: 'setupS', dice: null, last: null, discard: null, msg: '',
+    longest: null, victims: null, winner: null,
     players: [0, 1, 2].map(() => ({ hand: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 } })),
     vOwn: Array(B.verts.length).fill(null), // {p, city}
     eOwn: Array(B.edges.length).fill(null),
   };
 }
 
-export const vp = (g, p) => g.vOwn.reduce((s, v) => s + (v && v.p === p ? (v.city ? 2 : 1) : 0), 0);
-export const afford = (g, kind) => RES.every((r) => g.players[g.cur].hand[r] >= (COST[kind][r] || 0));
+const count = (g, p, kind) => (kind === 'road' ? g.eOwn.filter((o) => o === p).length : g.vOwn.filter((v) => v && v.p === p && v.city === (kind === 'city')).length);
+
+// 最長交易路: 辺を 2 度通らない道のりの最長（相手の建物で切れる。輪もそのまま数える）
+export function roadLength(g, p) {
+  const B = g.B, mine = [];
+  B.edges.forEach((e, i) => { if (g.eOwn[i] === p) mine.push(i); });
+  const blocked = (v) => g.vOwn[v] && g.vOwn[v].p !== p;
+  const used = new Set();
+  const go = (v, from) => {
+    if (blocked(v)) return 0;
+    let best = 0;
+    for (const e of B.vEdges[v]) {
+      if (g.eOwn[e] !== p || used.has(e)) continue;
+      used.add(e);
+      const o = B.edges[e][0] === v ? B.edges[e][1] : B.edges[e][0];
+      best = Math.max(best, 1 + go(o, e));
+      used.delete(e);
+    }
+    return best;
+  };
+  let max = 0;
+  mine.forEach((e) => B.edges[e].forEach((v) => { used.clear(); used.add(e); max = Math.max(max, 1 + go(B.edges[e][0] === v ? B.edges[e][1] : B.edges[e][0], e)); }));
+  return max;
+}
+// 5 本以上で最長なら 2 点。同点なら持っている人のまま
+export function updateLongest(g) {
+  const lens = g.players.map((_, p) => roadLength(g, p)), max = Math.max(...lens);
+  const top = lens.map((l, p) => (l === max ? p : -1)).filter((p) => p >= 0);
+  if (max < 5) g.longest = null;
+  else if (top.length === 1) g.longest = top[0];
+  else if (!top.includes(g.longest)) g.longest = null;
+}
+
+// 銀行との交換の率: 接する市場が自分の資源なら 2、3:1 の市場なら 3、なければ 4
+export function tradeRate(g, p, give) {
+  let rate = 4;
+  g.vOwn.forEach((o, v) => {
+    if (!o || o.p !== p) return;
+    const m = g.tiles[g.B.verts[v].tiles[0]].market;
+    if (m === give) rate = Math.min(rate, 2); else if (m === 'any') rate = Math.min(rate, 3);
+  });
+  return rate;
+}
+
+export const vp = (g, p) => g.vOwn.reduce((s, v) => s + (v && v.p === p ? (v.city ? 2 : 1) : 0), 0) + (g.longest === p ? 2 : 0);
+const room = (g, kind) => count(g, g.cur, kind) < MAX[kind];
+export const afford = (g, kind) => room(g, kind) && RES.every((r) => g.players[g.cur].hand[r] >= (COST[kind][r] || 0));
 const pay = (g, kind) => RES.forEach((r) => { g.players[g.cur].hand[r] -= COST[kind][r] || 0; });
 
 // 開拓地を置ける頂点（距離ルール。本番は自分の道につながること）
 export function legalSettle(g) {
   const B = g.B, out = [];
+  if (!room(g, 'settle')) return out;
   B.verts.forEach((_, v) => {
     if (g.vOwn[v] || B.vNbr[v].some((n) => g.vOwn[n])) return;
     if (g.phase === 'main' && !B.vEdges[v].some((e) => g.eOwn[e] === g.cur)) return;
@@ -33,9 +109,10 @@ export function legalSettle(g) {
   });
   return out;
 }
-export const legalCity = (g) => g.vOwn.map((v, i) => (v && v.p === g.cur && !v.city ? i : -1)).filter((i) => i >= 0);
+export const legalCity = (g) => !room(g, 'city') ? [] : g.vOwn.map((v, i) => (v && v.p === g.cur && !v.city ? i : -1)).filter((i) => i >= 0);
 export function legalRoad(g) {
   const B = g.B, out = [];
+  if (!room(g, 'road')) return out;
   B.edges.forEach(([a, b], e) => {
     if (g.eOwn[e] != null) return;
     if (g.phase === 'setupR') { if (a === g.last || b === g.last) out.push(e); return; }
@@ -72,19 +149,23 @@ export function discard(g, r) {
   h[r]--; d.n--;
   nextDiscard(g);
 }
-// 盗賊を動かし、隣接プレイヤーの 1 人（ランダム）から 1 枚（ランダム）奪う
+// 盗賊を六角形に動かす。奪える相手が 2 人以上なら 'steal' で手番の人が選ぶ
 export function moveRobber(g, t) {
-  if (t === g.robber) return;
+  if (t === g.robber || t < 12) return;
   g.robber = t;
-  const vs = [...new Set(g.B.tiles[t].verts.map((v) => g.vOwn[v]).filter((o) => o && o.p !== g.cur && sum(g.players[o.p].hand) > 0).map((o) => o.p))];
-  if (vs.length) {
-    const victim = vs[Math.floor(Math.random() * vs.length)], h = g.players[victim].hand;
-    const cards = RES.flatMap((r) => Array(h[r]).fill(r));
-    const r = cards[Math.floor(Math.random() * cards.length)];
-    h[r]--; g.players[g.cur].hand[r]++;
-    g.msg = `プレイヤー${victim + 1}から 1 枚奪った`;
-  }
+  g.victims = [...new Set(g.B.tiles[t].verts.map((v) => g.vOwn[v]).filter((o) => o && o.p !== g.cur && sum(g.players[o.p].hand) > 0).map((o) => o.p))];
+  if (g.victims.length > 1) { g.phase = 'steal'; return; }
   g.phase = 'main';
+  if (g.victims.length) steal(g, g.victims[0]);
+}
+export function steal(g, victim) {
+  if (g.phase !== 'steal' && g.phase !== 'main') return;
+  if (!g.victims || !g.victims.includes(victim)) return;
+  const h = g.players[victim].hand, cards = RES.flatMap((r) => Array(h[r]).fill(r));
+  const r = cards[Math.floor(Math.random() * cards.length)];
+  h[r]--; g.players[g.cur].hand[r]++;
+  g.msg = `プレイヤー${victim + 1}から 1 枚奪った`;
+  g.victims = null; g.phase = 'main';
 }
 
 export function build(g, kind, i) {
@@ -100,12 +181,15 @@ export function build(g, kind, i) {
     if (kind === 'road') g.eOwn[i] = g.cur;
     else g.vOwn[i] = { p: g.cur, city: kind === 'city' };
   }
-  if (vp(g, g.cur) >= 10) g.phase = 'over';
+  updateLongest(g);
+  const w = [g.cur, 0, 1, 2].find((p) => vp(g, p) >= 10);
+  if (w != null) { g.cur = w; g.winner = w; g.phase = 'over'; }
 }
 export function bankTrade(g, give, get) {
   const h = g.players[g.cur].hand;
-  if (give === get || h[give] < 4) return false;
-  h[give] -= 4; h[get]++;
+  const rate = tradeRate(g, g.cur, give);
+  if (give === get || h[give] < rate) return false;
+  h[give] -= rate; h[get]++;
   return true;
 }
 export function endTurn(g) { g.cur = (g.cur + 1) % 3; g.phase = 'roll'; g.dice = null; g.msg = ''; }
