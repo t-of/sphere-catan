@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0b0c10">
+  <meta name="theme-color" content="#0d1720">
   <meta name="description" content="サッカーボール形の盤の上で遊ぶ、3 人交代のカタン風ゲームの試作。">
   <title>sphere-catan — sphere-catan</title>
 
@@ -27,6 +27,10 @@
   <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="./webapp-kit/webapp-kit.css">
   <link rel="stylesheet" href="./style.css">
 </head>
@@ -35,8 +39,8 @@
     <header class="bar">
       <h1 class="bar__title">sphere-catan</h1>
       <div class="bar__actions">
-        <button class="pill" data-wak="install" hidden>アプリにする</button>
-        <button class="pill" data-wak="share">共有</button>
+        <button class="btn btn--small" data-wak="install" hidden>アプリにする</button>
+        <button class="btn btn--small" data-wak="share">共有</button>
       </div>
     </header>
 
@@ -45,7 +49,7 @@
       <div class="msg" id="msg" hidden></div>
     </section>
 
-    <section class="panel" id="panel">
+    <section class="panel panel--play" id="panel">
       <div class="who" id="who"></div>
       <div class="hand" id="hand"></div>
       <div class="btns" id="btns"></div>
@@ -53,7 +57,7 @@
         <label class="trade__col">出す<select id="give"></select></label>
         <span class="trade__arrow">→</span>
         <label class="trade__col">もらう<select id="get"></select></label>
-        <button class="pill go" id="tbtn">交換</button>
+        <button class="btn btn--accent" id="tbtn">交換</button>
       </div>
     </section>
 

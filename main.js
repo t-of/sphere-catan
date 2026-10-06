@@ -1,5 +1,6 @@
 import * as THREE from './vendor/three.module.min.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
+import * as I from './illust.js';
 import { buildBoard } from './board.js';
 import { COST, RES, afford, bankTrade, build, discard, endTurn, legalCity, legalRoad, legalSettle, moveRobber, newGame, roll, steal, tradeRate, vp } from './game.js';
 
@@ -21,6 +22,20 @@ function beep(f = 440, d = 0.08) {
     const o = actx.createOscillator(), a = actx.createGain();
     o.frequency.value = f; a.gain.value = 0.05; o.connect(a); a.connect(actx.destination); o.start(); o.stop(actx.currentTime + d);
   } catch { /* 鳴らせなくても遊べる */ }
+}
+// 資源アイコン（catan の resIcon と同じ。40x40 の SVG）
+const NS = 'http://www.w3.org/2000/svg';
+function resIcon(kind) {
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 40 40'); svg.setAttribute('class', 'res-icon');
+  const shapes = []; I.resourceIcon(shapes, kind);
+  shapes.forEach((s) => {
+    const n = document.createElementNS(NS, 'path');
+    n.setAttribute('d', s.d); n.setAttribute('fill', s.f);
+    n.setAttribute('style', `opacity:${s.o};stroke:${s.sk};stroke-width:${s.sw}px;stroke-linejoin:round;stroke-linecap:round`);
+    svg.appendChild(n);
+  });
+  return svg;
 }
 const $ = (id) => document.getElementById(id);
 
@@ -159,17 +174,17 @@ function ui() {
   const over = g.phase === 'over';
   $('who').replaceChildren(...[0, 1, 2].map((p) => {
     const el = document.createElement('div');
-    el.className = 'score' + (p === g.cur ? ' cur' : '') + (over && p === g.cur ? ' win' : '');
+    el.className = 'player-card' + (p === g.cur ? ' is-turn' : '');
     el.style.setProperty('--pc', hex(PCOL[p]));
     const n = RES.reduce((t, r) => t + g.players[p].hand[r], 0);
-    el.innerHTML = `<i class="dot"></i><span class="score__name">${PNAME[p]}</span><b class="score__vp">${vp(g, p)}<small>点</small></b><span class="score__n">手札${n}</span>`;
+    el.innerHTML = `<span class="player-card__dot" style="background:${hex(PCOL[p])}">${PNAME[p]}</span><div class="player-card__body"><span class="player-card__name"><span class="player-card__nametext">${PNAME[p]}</span>${p === g.cur ? '<span class="player-card__cur">手番</span>' : ''}</span><span class="player-card__sub">手札 ${n} 枚</span></div><div class="player-card__vp"><b>${vp(g, p)}</b><span>点</span></div>`;
     return el;
   }));
   if (over) { const w = document.createElement('div'); w.className = 'win-banner'; w.style.setProperty('--pc', hex(PCOL[g.cur])); w.textContent = `${PNAME[g.cur]}の勝ち！ ${vp(g, g.cur)} 点`; $('who').append(w); }
   $('hand').classList.toggle('discarding', !!d);
   $('hand').replaceChildren(...RES.map((r) => {
-    const b = document.createElement('button'); b.className = 'card' + (hand[r] ? '' : ' zero'); b.style.setProperty('--c', hex(COL[r]));
-    b.innerHTML = `<span class="card__n">${hand[r]}</span><span class="card__name">${NAME[r]}</span>`;
+    const b = document.createElement('button'); b.className = 'hand__res' + (hand[r] ? '' : ' zero'); b.title = NAME[r];
+    b.append(resIcon(r)); b.insertAdjacentHTML('beforeend', `<b>${hand[r]}</b>`);
     b.onclick = () => { if (d) { discard(g, r); refresh(); } };
     return b;
   }));
@@ -177,13 +192,14 @@ function ui() {
   const txt = g.phase === 'steal' ? '奪う相手を選ぶ' : d ? `${PNAME[d.p]}：手札を ${d.n} 枚捨てる（資源をタップ）` : [T[g.phase], g.msg].filter(Boolean).join('　');
   const m = $('msg'); m.innerHTML = dice; m.append(document.createTextNode(txt)); m.hidden = !dice && !txt;
   const main = g.phase === 'main';
-  const mk = (label, fn, ok, on) => { const b = document.createElement('button'); b.className = 'pill' + (on ? ' on' : ''); b.textContent = label; b.disabled = !ok; b.onclick = fn; return b; };
+  const mk = (label, fn, ok, on) => { const b = document.createElement('button'); b.className = 'btn' + (on ? ' is-selected' : ''); b.textContent = label; b.disabled = !ok; b.onclick = fn; return b; };
   const build_ = (kind) => {
     const b = mk('', () => { mode = mode === kind ? null : kind; refresh(); }, main && afford(g, kind), mode === kind);
-    b.classList.add('build');
+    b.classList.add('build-btn');
     const need = RES.filter((r) => COST[kind][r]);
     const miss = need.filter((r) => g.players[g.cur].hand[r] < COST[kind][r]);
-    b.innerHTML = `<span>${BNAME[kind]}</span><span class="cost">` + need.map((r) => `<em class="${main && miss.includes(r) ? 'lack' : ''}" style="--c:${hex(COL[r])}">${COST[kind][r]}</em>`).join('') + '</span>';
+    b.innerHTML = `<span class="build-btn__label">${BNAME[kind]}</span><span class="build-btn__cost"></span>`;
+    need.forEach((r) => { const c = document.createElement('span'); c.className = 'cost-pair' + (main && miss.includes(r) ? ' lack' : ''); c.append(resIcon(r)); c.insertAdjacentHTML('beforeend', `<span>${COST[kind][r]}</span>`); b.lastChild.append(c); });
     b.title = main && miss.length ? `不足: ${miss.map((r) => NAME[r]).join('・')}` : '';
     return b;
   };
